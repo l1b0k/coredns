@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -89,7 +90,7 @@ func (f *Forward) Name() string { return "forward" }
 // ServeDNS implements plugin.Handler.
 func (f *Forward) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
-	if !f.match(state) {
+	if !f.match(ctx, state) {
 		return plugin.NextOrFailure(f.Name(), f.Next, ctx, w, r)
 	}
 
@@ -205,7 +206,18 @@ func (f *Forward) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 	return dns.RcodeServerFailure, ErrNoHealthy
 }
 
-func (f *Forward) match(state request.Request) bool {
+func (f *Forward) match(ctx context.Context, state request.Request) bool {
+	slice := strings.Split(f.from, ":")
+	if len(slice) == 2 {
+		fn := metadata.ValueFunc(ctx, "forward/label")
+		if fn != nil {
+			if fn() == strings.TrimSuffix(slice[1], ".") {
+				return true
+			}
+		}
+		// ctx has no metadata
+		return false
+	}
 	if !plugin.Name(f.from).Matches(state.Name()) || !f.isAllowedDomain(state.Name()) {
 		return false
 	}
